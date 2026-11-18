@@ -8,21 +8,40 @@
 import { readFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 
-const env = Object.fromEntries(
-  readFileSync('.env', 'utf8')
-    .split('\n')
-    .filter((l) => l.includes('=') && !l.trimStart().startsWith('#'))
-    .map((l) => {
-      const i = l.indexOf('=');
-      return [l.slice(0, i).trim(), l.slice(i + 1).split('#')[0].trim()];
-    }),
-);
+// Prefer real environment variables (how a host supplies them), and fall back
+// to a local .env for development.
+function loadEnv() {
+  let fileVars = {};
+  try {
+    fileVars = Object.fromEntries(
+      readFileSync('.env', 'utf8')
+        .split('\n')
+        .filter((l) => l.includes('=') && !l.trimStart().startsWith('#'))
+        .map((l) => {
+          const i = l.indexOf('=');
+          return [l.slice(0, i).trim(), l.slice(i + 1).split('#')[0].trim()];
+        }),
+    );
+  } catch {
+    // No .env here — expected on a server.
+  }
+  return { ...fileVars, ...Object.fromEntries(Object.entries(process.env).filter(([, v]) => v)) };
+}
+
+const env = loadEnv();
+
+for (const key of ['PAGA_PUBLIC_KEY', 'PAGA_SECRET_KEY', 'PAGA_HMAC_KEY']) {
+  if (!env[key]) {
+    console.error(`Missing ${key} — set it in the environment or .env`);
+    process.exit(1);
+  }
+}
 
 const reference = `SMOKE-${randomUUID().slice(0, 8)}`;
 const hash = createHash('sha512').update(reference + env.PAGA_HMAC_KEY).digest('hex');
 
 const res = await fetch(
-  `${env.PAGA_BUSINESS_BASE_URL}/paga-webservices/business-rest/secured/accountBalance`,
+  `${env.PAGA_BUSINESS_BASE_URL ?? 'https://beta.mypaga.com'}/paga-webservices/business-rest/secured/accountBalance`,
   {
     method: 'POST',
     headers: {
