@@ -96,6 +96,7 @@ const subsidiaryBody = {
   lastName: 'Escrow',
   phoneNumber: '08010000002',
   email: 'escrow@example.com',
+  status: 'ACTIVE',
   callbackUrl,
 };
 // referenceNumber + accountReference + iifiNumber + autoSweep.bankPublicId
@@ -108,5 +109,18 @@ await probe(
   { Authorization: `Basic ${basic}`, hash: subsidiaryHash },
   subsidiaryBody,
 );
+
+// 5. Read it back: this is the server-side balance check that will back up
+// the funding callback, exactly as the status check did for collections.
+process.stdout.write(`\n--- 5. Retrieve subsidiary account ${accountRef}\n`);
+try {
+  const res = await fetch(`${collect}/subsidiary-accounts/${accountRef}`, {
+    method: 'GET',
+    headers: { Authorization: `Basic ${basic}`, hash: hash([accountRef]) },
+  });
+  console.log(`    GET -> HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+} catch (e) {
+  console.log(`    network error: ${e.message}`);
+}
 
 console.log('\nDone.');
