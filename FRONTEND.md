@@ -13,14 +13,14 @@ Everything below is already live. You do not need the backend running locally.
 Phone OTP only — there are no passwords and no sign-up screen. A user is created on first contact.
 
 ```ts
-// 1. ask for a code
+// 1. ask for a code. Include email only when the number may be new.
 await fetch(`${API}/auth/otp/request`, {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ phone: '+2348010000001' }),
+  body: JSON.stringify({ phone: '+2348010000001', email: 'buyer@example.com' }),
 });
-// emailed:     { "sent": true,  "channel": "email" }
-// not emailed: { "sent": false, "channel": "log", "debugCode": "527448" }
+// emailed:       { "sent": true,  "channel": "email" }
+// nowhere to go: { "sent": false, "channel": "log", "needsEmail": true }
 
 // 2. exchange it for a token
 const { token, user } = await fetch(`${API}/auth/otp/verify`, {
@@ -32,11 +32,18 @@ const { token, user } = await fetch(`${API}/auth/otp/verify`, {
 
 Send `Authorization: Bearer <token>` on every other call. Tokens last 7 days.
 
-The phone number is the identity; **the email is only a delivery address** for the code, and it is a
-property of the account — not something the sign-in request can set. Codes go to whatever address is
-already stored on that user.
+The phone number is the identity; **the email is only a delivery address** for the code.
 
-To add or change one, the user must already be signed in:
+The `email` field is accepted **only when that phone number has no account yet** — it becomes the
+new account's delivery address. For a number that already exists, the field is ignored and the code
+goes to whatever address is stored. That asymmetry is deliberate: if an existing account's delivery
+address could be set from the sign-in request, anyone could ask for a code for your number and have
+it mailed to themselves.
+
+So handle `needsEmail: true` in your UI: it means the account exists but has nowhere to receive a
+code. The owner has to add one while signed in — there is no way to set it from the sign-in screen.
+
+To add or change the address, the user must already be signed in:
 
 ```ts
 await fetch(`${API}/auth/me/email`, {

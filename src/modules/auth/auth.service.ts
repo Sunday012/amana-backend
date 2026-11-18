@@ -40,7 +40,8 @@ export class AuthService {
   async findOrCreateByPhone(
     rawPhone: string,
     name?: string,
-  ): Promise<{ id: string; phone: string; email: string | null }> {
+    emailForNewAccount?: string,
+  ): Promise<{ id: string; phone: string; email: string | null; isNew: boolean }> {
     const phone = AuthService.normalisePhone(rawPhone);
     const existing = await this.prisma.user.findUnique({ where: { phone } });
     if (existing) {
@@ -48,10 +49,15 @@ export class AuthService {
         name && !existing.name
           ? await this.prisma.user.update({ where: { id: existing.id }, data: { name } })
           : existing;
-      return { id: updated.id, phone: updated.phone, email: updated.email };
+      return { id: updated.id, phone: updated.phone, email: updated.email, isNew: false };
     }
-    const created = await this.prisma.user.create({ data: { phone, name } });
-    return { id: created.id, phone: created.phone, email: created.email };
+    // Only a brand-new account may take a delivery address from the request:
+    // there is no one to impersonate yet. An existing account's address can
+    // only be changed by someone holding a token for it (see setEmail).
+    const created = await this.prisma.user.create({
+      data: { phone, name, email: emailForNewAccount },
+    });
+    return { id: created.id, phone: created.phone, email: created.email, isNew: true };
   }
 
   /**
@@ -70,8 +76,14 @@ export class AuthService {
 
   async requestOtp(
     rawPhone: string,
-  ): Promise<{ sent: boolean; channel: 'email' | 'log'; debugCode?: string }> {
-    const user = await this.findOrCreateByPhone(rawPhone);
+    email?: string,
+  ): Promise<{
+    sent: boolean;
+    channel: 'email' | 'log';
+    needsEmail?: boolean;
+    debugCode?: string;
+  }> {
+    const user = await this.findOrCreateByPhone(rawPhone, undefined, email);
     const code = randomInt(100000, 999999).toString();
     await this.prisma.otpCode.create({
       data: {
@@ -95,6 +107,11 @@ export class AuthService {
 
     if (delivered) return { sent: true, channel: 'email' };
 
+    // An existing account with nowhere to send: we will not accept a delivery
+    // address from the request, because that is how an account gets hijacked.
+    // The owner has to add one while signed in.
+    const needsEmail = !destination;
+
     // Nothing could deliver it. Log it so development still works, and only
     // return it in the response when OTP_DEBUG is explicitly on — that flag
     // lets anyone sign in as anyone, so it must never be set in production.
@@ -102,6 +119,7 @@ export class AuthService {
     return {
       sent: false,
       channel: 'log',
+      ...(needsEmail ? { needsEmail: true } : {}),
       ...(this.config.get('OTP_DEBUG') === 'true' ? { debugCode: code } : {}),
     };
   }
