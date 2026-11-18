@@ -79,6 +79,8 @@ export class CompilerService {
       throw new Error('Model did not return parseable JSON');
     }
 
+    parsed = CompilerService.reconcileAmounts(parsed);
+
     const result = compiledTermsSchema.safeParse(parsed);
     if (!result.success) {
       throw new BadRequestException({
@@ -87,6 +89,40 @@ export class CompilerService {
       });
     }
     return result.data;
+  }
+
+  /**
+   * Smaller models get the milestone arithmetic slightly wrong far more often
+   * than they get the *structure* wrong. A rounding-sized gap is absorbed into
+   * the last milestone so the sum is exact; anything larger is left alone and
+   * rejected by the schema, because that is a model misunderstanding the brief
+   * rather than fumbling the decimals.
+   */
+  static reconcileAmounts(parsed: unknown): unknown {
+    const value = parsed as {
+      total_amount?: unknown;
+      milestones?: { amount?: unknown }[];
+    };
+    const total = Number(value?.total_amount);
+    const milestones = value?.milestones;
+    if (!Number.isFinite(total) || !Array.isArray(milestones) || milestones.length === 0) {
+      return parsed;
+    }
+
+    const sum = milestones.reduce((acc, m) => acc + Number(m?.amount ?? 0), 0);
+    const drift = total - sum;
+    if (drift === 0) return parsed;
+
+    // Only repair gaps under 2% of the total — a rounding artefact, not a
+    // different plan.
+    if (Math.abs(drift) > Math.max(1, total * 0.02)) return parsed;
+
+    const last = milestones[milestones.length - 1];
+    const repaired = Number(last?.amount ?? 0) + drift;
+    if (repaired <= 0) return parsed;
+
+    last.amount = repaired;
+    return value;
   }
 
   /**
