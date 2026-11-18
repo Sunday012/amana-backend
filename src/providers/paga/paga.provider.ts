@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import {
@@ -115,7 +115,13 @@ export class PagaProvider extends PaymentProvider {
     if (!response.ok) {
       const detail = json.message ?? json.statusMessage ?? text.slice(0, 200);
       this.logger.error(`Paga ${url} failed: HTTP ${response.status} ${detail}`);
-      throw new Error(`Paga call failed with ${response.status}: ${detail}`);
+      // Surfaced rather than swallowed: a provider rejection is not our bug,
+      // and the message is the only way to tell apart auth, IP and payload
+      // problems from the outside.
+      throw new BadGatewayException({
+        message: 'Paga rejected the request',
+        provider: { endpoint: url, httpStatus: response.status, detail },
+      });
     }
 
     // Paga reports business failures in the body, not the HTTP status, and the
@@ -127,7 +133,10 @@ export class PagaProvider extends PaymentProvider {
     if (envelopeCode !== undefined && String(envelopeCode) !== '0') {
       const detail = json.message ?? json.statusMessage ?? '';
       this.logger.error(`Paga ${url} rejected: code ${envelopeCode} ${detail}`);
-      throw new Error(`Paga rejected the request (code ${envelopeCode}): ${detail}`);
+      throw new BadGatewayException({
+        message: 'Paga rejected the request',
+        provider: { endpoint: url, code: String(envelopeCode), detail },
+      });
     }
     return json;
   }
