@@ -92,22 +92,21 @@ const subsidiaryBody = {
   referenceNumber: ref,
   accountReference: accountRef,
   accountName: 'Amana Test Escrow',
+  firstName: 'Amana',
+  lastName: 'Escrow',
+  phoneNumber: '08010000002',
+  email: 'escrow@example.com',
   callbackUrl,
 };
 // referenceNumber + accountReference + iifiNumber + autoSweep.bankPublicId
 // + autoSweep.destination + autoSweep.accountNumber + callbackUrl
 const subsidiaryHash = hash([ref, accountRef, '', '', '', '', callbackUrl]);
 
-for (const [label, base] of [
-  ['4. Subsidiary account on COLLECT host', collect],
-  ['5. Subsidiary account on BUSINESS host', business],
-]) {
-  await probe(
-    label,
-    `${base}/subsidiary-accounts`,
-    { Authorization: `Basic ${basic}`, hash: subsidiaryHash },
-    subsidiaryBody,
-  );
-}
+await probe(
+  '4. Create subsidiary account (ledger-backed, holds funds)',
+  `${collect}/subsidiary-accounts`,
+  { Authorization: `Basic ${basic}`, hash: subsidiaryHash },
+  subsidiaryBody,
+);
 
 console.log('\nDone.');
