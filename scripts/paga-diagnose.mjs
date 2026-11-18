@@ -112,15 +112,27 @@ await probe(
 
 // 5. Read it back: this is the server-side balance check that will back up
 // the funding callback, exactly as the status check did for collections.
+// 5. Read it back. referenceNumber is a QUERY parameter and leads the hash.
+const balRef = `BAL-${accountRef}`;
 process.stdout.write(`\n--- 5. Retrieve subsidiary account ${accountRef}\n`);
 try {
-  const res = await fetch(`${collect}/subsidiary-accounts/${accountRef}`, {
-    method: 'GET',
-    headers: { Authorization: `Basic ${basic}`, hash: hash([accountRef]) },
-  });
+  const res = await fetch(
+    `${collect}/subsidiary-accounts/${accountRef}?referenceNumber=${encodeURIComponent(balRef)}`,
+    { method: 'GET', headers: { Authorization: `Basic ${basic}`, hash: hash([balRef, accountRef]) } },
+  );
   console.log(`    GET -> HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
 } catch (e) {
   console.log(`    network error: ${e.message}`);
 }
+
+// 6. Charge it. Expected to fail for insufficient funds on a zero balance —
+// which still proves the path, the auth and the hash order are right.
+const chargeRef = `CHG-${accountRef}`;
+await probe(
+  '6. Charge the subsidiary account (expect insufficient funds, not system error)',
+  `${collect}/subsidiary-accounts/${accountRef}/charge`,
+  { Authorization: `Basic ${basic}`, hash: hash([chargeRef, '100', 'NGN', 'Amana release']) },
+  { referenceNumber: chargeRef, amount: 100, currency: 'NGN', narration: 'Amana release' },
+);
 
 console.log('\nDone.');

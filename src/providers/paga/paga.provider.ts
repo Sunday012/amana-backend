@@ -62,6 +62,35 @@ export class PagaProvider extends PaymentProvider {
       .digest('hex');
   }
 
+  /**
+   * Our permanent id for an agreement's account: 11-30 alphanumeric characters,
+   * derived from the payment reference so both sides agree on it.
+   */
+  static accountReferenceFor(reference: string): string {
+    return reference.replace(/[^a-zA-Z0-9]/g, '').slice(0, 30);
+  }
+
+  /** Collect reads: same auth, no body. */
+  private async collectGet<T>(path: string, hashParts: (string | undefined)[]): Promise<T> {
+    const credentials = Buffer.from(
+      `${this.config.get<string>('PAGA_PUBLIC_KEY') ?? ''}:${this.config.get<string>('PAGA_SECRET_KEY') ?? ''}`,
+    ).toString('base64');
+
+    const response = await fetch(`${this.collectBaseUrl}${path}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Basic ${credentials}`,
+        hash: this.signature(hashParts),
+      },
+    });
+    const text = await response.text();
+    const json = JSON.parse(text) as T & { statusCode?: string; statusMessage?: string };
+    if (!response.ok || (json.statusCode !== undefined && String(json.statusCode) !== '0')) {
+      throw new Error(`Paga GET ${path} failed: ${json.statusMessage ?? response.status}`);
+    }
+    return json;
+  }
+
   /** Collect and Direct Debit: HTTP Basic. */
   private async collectCall<T>(
     path: string,
@@ -210,12 +239,14 @@ export class PagaProvider extends PaymentProvider {
    * because the provider is unreachable.
    */
   async getCollectionStatus(reference: string): Promise<CollectionStatus> {
-    const accountReference = reference.replace(/[^a-zA-Z0-9]/g, '').slice(0, 30);
+    const accountReference = PagaProvider.accountReferenceFor(reference);
+    const requestRef = `BAL-${accountReference}`.slice(0, 40);
     try {
-      const result = await this.collectCall<{ balance?: number; currency?: string }>(
-        `/subsidiary-accounts/${accountReference}/details`,
-        { accountReference },
-        [accountReference],
+      // GET /subsidiary-accounts/{accountIdentifier}?referenceNumber=…
+      // hash = referenceNumber + accountIdentifier
+      const result = await this.collectGet<{ balance?: number; currency?: string }>(
+        `/subsidiary-accounts/${accountReference}?referenceNumber=${encodeURIComponent(requestRef)}`,
+        [requestRef, accountReference],
       );
       return {
         reference,
@@ -265,6 +296,35 @@ export class PagaProvider extends PaymentProvider {
    * depositToBank on the Business API. The idempotency key doubles as Paga's
    * referenceNumber, so a retry reuses it and can never pay twice.
    */
+  /**
+   * Releasing held money is two steps, and both are idempotent on their
+   * referenceNumber, so a retry after a timeout can neither double-debit the
+   * agreement's account nor pay the seller twice:
+   *
+   *   1. charge the agreement's subsidiary account -> business balance
+   *   2. depositToBank -> the seller
+   *
+   * If step 2 fails after step 1 succeeded, the money is in the business
+   * balance and the payout stays PENDING for the reconciler; re-running
+   * repeats step 1 as a no-op.
+   */
+  private async chargeHeldFunds(req: PayoutRequest): Promise<void> {
+    if (!req.sourceReference) return;
+
+    const accountReference = PagaProvider.accountReferenceFor(req.sourceReference);
+    const amount = (Number(req.amountMinor) / 100).toFixed(2);
+    const narration = req.memo.slice(0, 64);
+    const chargeRef = `${req.idempotencyKey}-c`;
+
+    await this.collectCall(
+      `/subsidiary-accounts/${accountReference}/charge`,
+      { referenceNumber: chargeRef, amount: Number(amount), currency: req.currency, narration },
+      // referenceNumber + amount + currency + narration
+      [chargeRef, String(Number(amount)), req.currency, narration],
+    );
+    this.logger.log(`Charged ${amount} from held account ${accountReference}`);
+  }
+
   async sendPayout(req: PayoutRequest): Promise<PayoutResult> {
     const amount = (Number(req.amountMinor) / 100).toFixed(2);
 
@@ -277,6 +337,8 @@ export class PagaProvider extends PaymentProvider {
     }
 
     try {
+      await this.chargeHeldFunds(req);
+
       const result = await this.businessCall<{
         referenceNumber?: string;
         transactionId?: string;

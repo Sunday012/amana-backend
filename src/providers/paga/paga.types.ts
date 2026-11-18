@@ -46,6 +46,12 @@ export interface PayoutRequest {
   recipient: string;
   /** Paga's UUID for the destination bank; required by depositToBank. */
   destinationBankUuid?: string;
+  /**
+   * The payment reference whose held funds are being released. Money sits in
+   * the agreement's own account, so it has to be charged back to the business
+   * balance before it can be sent on.
+   */
+  sourceReference?: string;
   memo: string;
 }
 

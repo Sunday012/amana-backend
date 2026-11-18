@@ -281,7 +281,13 @@ export class PaymentsService {
   async payout(command: PayoutCommand): Promise<{ status: string; payoutId: string }> {
     const agreement = await this.prisma.agreement.findUnique({
       where: { id: command.agreementId },
-      include: { payee: true, payouts: true, ledgerEntries: true, milestones: true },
+      include: {
+        payee: true,
+        payouts: true,
+        ledgerEntries: true,
+        milestones: true,
+        payments: true,
+      },
     });
     if (!agreement) throw new NotFoundException('Agreement not found');
 
@@ -359,6 +365,8 @@ export class PaymentsService {
       currency: agreement.currency,
       recipient,
       destinationBankUuid: agreement.payee.payoutBankUuid ?? undefined,
+      // Funds are held in the agreement's own Paga account, not our balance.
+      sourceReference: agreement.payments.find((p) => p.status === 'CONFIRMED')?.pagaReference,
       memo: `Amana ${agreement.title}`.slice(0, 64),
     });
 
@@ -485,7 +493,7 @@ export class PaymentsService {
   async refund(agreementId: string, actor: string, memo: string): Promise<void> {
     const agreement = await this.prisma.agreement.findUniqueOrThrow({
       where: { id: agreementId },
-      include: { payer: true, ledgerEntries: true },
+      include: { payer: true, ledgerEntries: true, payments: true },
     });
     const held = agreement.ledgerEntries
       .filter((e) => e.type === 'HELD')
@@ -503,6 +511,7 @@ export class PaymentsService {
       currency: agreement.currency,
       recipient: agreement.payer.payoutRef ?? agreement.payer.phone,
       destinationBankUuid: agreement.payer.payoutBankUuid ?? undefined,
+      sourceReference: agreement.payments.find((p) => p.status === 'CONFIRMED')?.pagaReference,
       memo,
     });
 
