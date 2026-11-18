@@ -1,0 +1,10 @@
+node_modules
+dist
+*.log
+.vitest
+
+# Every env file is secret except the checked-in examples.
+.env
+.env.*
+!.env.example
+!.env.production.example

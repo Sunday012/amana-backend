@@ -1,0 +1,450 @@
+openapi: 3.0.3
+info:
+  title: Amana API
+  version: 0.1.0
+  description: >
+    Agree. Verify. Pay. One agreement-to-payment engine behind WhatsApp, the web
+    app and (later) the public API. Money moves only from RELEASABLE, and only
+    the backend may call the payout endpoint.
+servers:
+  - url: http://localhost:3001
+    description: Local
+tags:
+  - name: auth
+  - name: agreements
+  - name: milestones
+  - name: payments
+  - name: webhooks
+  - name: admin
+  - name: bot
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    internalKey:
+      type: apiKey
+      in: header
+      name: x-internal-key
+  schemas:
+    AgreementStatus:
+      type: string
+      enum: [DRAFT, AWAITING_PAYMENT, FUNDED, IN_PROGRESS, EVIDENCE_IN, RELEASABLE, PAYING_OUT, COMPLETED, DISPUTED, REFUNDED, EXPIRED]
+    NextAction:
+      type: object
+      properties:
+        key: { type: string, example: confirm_receipt }
+        label: { type: string, example: Confirm receipt or report a problem }
+        actor: { type: string, enum: [payer, payee, both, admin, nobody] }
+        isYours: { type: boolean }
+    Agreement:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [TRADE, MILESTONE] }
+        status: { $ref: '#/components/schemas/AgreementStatus' }
+        title: { type: string }
+        totalAmount: { type: string, description: Minor units as a string }
+        currency: { type: string, example: NGN }
+        version: { type: integer }
+        disputeLock: { type: boolean }
+        viewerRole: { type: string, enum: [payer, payee, observer] }
+        nextAction: { $ref: '#/components/schemas/NextAction' }
+    Error:
+      type: object
+      properties:
+        statusCode: { type: integer }
+        message: { type: string }
+
+paths:
+  /health:
+    get:
+      tags: [auth]
+      summary: Liveness plus which provider modes are active
+      responses: { '200': { description: OK } }
+
+  /auth/otp/request:
+    post:
+      tags: [auth]
+      summary: Send a login code to a phone number (creates the user on first contact)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties: { phone: { type: string, example: '+2348010000001' } }
+      responses:
+        '201': { description: Code sent; debugCode is returned only when OTP_DEBUG=true }
+  /auth/otp/verify:
+    post:
+      tags: [auth]
+      summary: Exchange a code for a JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, code]
+              properties:
+                phone: { type: string }
+                code: { type: string, minLength: 6, maxLength: 6 }
+      responses:
+        '201': { description: Token and user }
+        '401': { description: Bad or expired code }
+  /auth/me:
+    get:
+      tags: [auth]
+      security: [{ bearer: [] }]
+      responses: { '200': { description: The signed-in user } }
+
+  /agreements:
+    post:
+      tags: [agreements]
+      summary: Create a TRADE agreement (seller)
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, amount, buyerPhone]
+              properties:
+                title: { type: string }
+                amount: { type: integer, description: Minor units (kobo) }
+                currency: { type: string, default: NGN }
+                buyerPhone: { type: string }
+                deliveryTerms: { type: string }
+                pickupAddress: { type: string }
+                dropoffAddress: { type: string }
+                createdVia: { type: string, enum: [WEB, WHATSAPP, API, DISCORD] }
+                autoReleaseHours: { type: integer }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Agreement' } } } }
+    get:
+      tags: [agreements]
+      summary: My agreements, optionally filtered by status
+      security: [{ bearer: [] }]
+      parameters:
+        - in: query
+          name: status
+          schema: { $ref: '#/components/schemas/AgreementStatus' }
+      responses: { '200': { description: List } }
+
+  /agreements/milestone:
+    post:
+      tags: [agreements]
+      summary: Create a MILESTONE agreement
+      description: Milestone amounts must sum exactly to totalAmount.
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, freelancerPhone, totalAmount, milestones]
+              properties:
+                title: { type: string }
+                freelancerPhone: { type: string }
+                totalAmount: { type: integer }
+                aiGenerated: { type: boolean }
+                milestones:
+                  type: array
+                  items:
+                    type: object
+                    required: [title, amount, conditions]
+                    properties:
+                      title: { type: string }
+                      amount: { type: integer }
+                      conditions:
+                        type: array
+                        items: { type: string, enum: [tests_pass, client_approval, evidence_submitted] }
+                      verification: { type: string }
+      responses:
+        '201': { description: Created }
+        '400': { description: Milestone amounts do not sum to the total }
+
+  /agreements/compile:
+    post:
+      tags: [agreements]
+      summary: AI proposes milestone terms from plain text
+      description: Output is schema-validated and binds nobody until both parties approve.
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description]
+              properties:
+                description: { type: string }
+                currency: { type: string, default: NGN }
+                budgetAmount: { type: integer }
+      responses: { '201': { description: Proposed terms plus a review disclaimer } }
+
+  /agreements/{id}:
+    get:
+      tags: [agreements]
+      summary: Agreement with status and the viewer's next action
+      security: [{ bearer: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Agreement' } } } }
+        '403': { description: Not a party to this agreement }
+
+  /agreements/{id}/timeline:
+    get:
+      tags: [agreements]
+      summary: The append-only audit log (the web status timeline reads this)
+      security: [{ bearer: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses: { '200': { description: Ordered audit entries } }
+
+  /agreements/{id}/approve:
+    post:
+      tags: [agreements]
+      summary: A party approves the current version
+      description: When both have approved, the agreement locks and a payment reference is created.
+      security: [{ bearer: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses: { '201': { description: Updated agreement } }
+
+  /agreements/{id}/terms:
+    patch:
+      tags: [agreements]
+      summary: Edit terms; creates a new version that both parties must approve again
+      security: [{ bearer: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                totalAmount: { type: integer }
+                milestones: { type: array, items: { type: object } }
+                deliveryTerms: { type: string }
+                disputeTerms: { type: string }
+      responses:
+        '200': { description: New version }
+        '409': { description: Terms are locked after funding }
+
+  /agreements/{id}/delivery:
+    post:
+      tags: [agreements]
+      summary: Seller hands the item to Chowdeck
+      security: [{ bearer: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pickupAddress, dropoffAddress, itemDescription]
+              properties:
+                pickupAddress: { type: string }
+                dropoffAddress: { type: string }
+                itemDescription: { type: string }
+      responses:
+        '201': { description: Delivery created }
+        '409': { description: Agreement is not funded }
+
+  /agreements/{id}/confirm:
+    post:
+      tags: [agreements]
+      summary: Buyer confirms receipt, or reports a problem
+      security: [{ bearer: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome]
+              properties:
+                outcome: { type: string, enum: [CONFIRM, PROBLEM] }
+                note: { type: string }
+      responses: { '201': { description: Updated agreement } }
+
+  /agreements/{id}/dispute:
+    post:
+      tags: [agreements]
+      summary: Open a dispute and lock the payout
+      security: [{ bearer: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+                milestoneId: { type: string }
+                evidenceUrl: { type: string }
+      responses:
+        '201': { description: Agreement is DISPUTED and the payout is locked }
+        '409': { description: Payout already started; logged as a recovery case }
+
+  /milestones/{id}/evidence:
+    post:
+      tags: [milestones]
+      summary: Freelancer submits evidence (GitHub PR, screenshots, notes)
+      security: [{ bearer: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type: { type: string, enum: [GITHUB, UPLOAD] }
+                prUrl: { type: string }
+                screenshots: { type: array, items: { type: string } }
+                note: { type: string }
+      responses:
+        '201': { description: OutcomeOS evaluation }
+        '409': { description: Already attached, or the milestone is paid }
+
+  /milestones/{id}/approve:
+    post:
+      tags: [milestones]
+      summary: Client approves a milestone
+      description: Approval alone does not release money; every required condition must be true.
+      security: [{ bearer: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses: { '201': { description: OutcomeOS evaluation } }
+
+  /milestones/{id}/reject:
+    post:
+      tags: [milestones]
+      summary: Client rejects a milestone
+      security: [{ bearer: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties: { reason: { type: string } }
+      responses: { '201': { description: OutcomeOS evaluation } }
+
+  /payments/collections:
+    post:
+      tags: [payments]
+      summary: Create the Paga collection for an agreement
+      description: The amount is read from the stored agreement, never from the request.
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agreementId]
+              properties: { agreementId: { type: string, format: uuid } }
+      responses: { '201': { description: reference and checkoutUrl } }
+
+  /payments/{agreementId}:
+    get:
+      tags: [payments]
+      summary: Funding and payout status, with the internal ledger balance
+      security: [{ bearer: [] }]
+      parameters: [{ in: path, name: agreementId, required: true, schema: { type: string } }]
+      responses: { '200': { description: payments, payouts, ledger, balance } }
+
+  /payouts:
+    post:
+      tags: [payments]
+      summary: Run the guarded payout (backend only)
+      description: >
+        Requires RELEASABLE, no dispute lock, an amount within the held balance,
+        a recipient matching the agreement, and no payout already recorded.
+      security: [{ internalKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agreementId]
+              properties:
+                agreementId: { type: string, format: uuid }
+                milestoneId: { type: string, format: uuid }
+      responses:
+        '201': { description: status and payoutId }
+        '403': { description: Not an internal caller }
+        '409': { description: 'Payout refused: NOT_RELEASABLE | DISPUTE_LOCK | ALREADY_PAID | AMOUNT_EXCEEDS_HELD | RECIPIENT_MISMATCH | NO_RECIPIENT' }
+
+  /webhooks/paga:
+    post:
+      tags: [webhooks]
+      summary: Payment and payout callbacks
+      description: Signature verified, raw body stored, duplicates ignored by reference.
+      responses: { '200': { description: '{ accepted: boolean }' } }
+  /webhooks/chowdeck:
+    post:
+      tags: [webhooks]
+      summary: Delivery status events
+      description: Unknown delivery ids are rejected; duplicate events are ignored.
+      responses: { '200': { description: '{ accepted: boolean }' } }
+  /webhooks/github:
+    post:
+      tags: [webhooks]
+      summary: PR and test-result events
+      responses: { '200': { description: '{ accepted: boolean }' } }
+
+  /admin/disputes:
+    get:
+      tags: [admin]
+      summary: Open disputes with both sides' evidence
+      security: [{ bearer: [] }]
+      responses: { '200': { description: List }, '403': { description: Admin only } }
+  /admin/disputes/{id}/rule:
+    post:
+      tags: [admin]
+      summary: A human rules release or refund
+      security: [{ bearer: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reasoning]
+              properties:
+                decision: { type: string, enum: [RELEASE, REFUND] }
+                reasoning: { type: string }
+      responses: { '201': { description: Ruling recorded and money moved } }
+
+  /bot/message:
+    post:
+      tags: [bot]
+      summary: Inbound chat message from the WhatsApp or Discord process
+      security: [{ internalKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, message]
+              properties:
+                phone: { type: string }
+                message: { type: string }
+      responses: { '200': { description: '{ reply: string }' } }

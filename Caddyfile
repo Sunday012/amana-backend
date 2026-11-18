@@ -1,0 +1,6 @@
+# Caddy gets and renews the TLS certificate automatically, so the webhook URL
+# is HTTPS from the first request. Point DOMAIN's A record at this server first.
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy api:3001
+}

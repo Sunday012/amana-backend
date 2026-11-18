@@ -1,0 +1,10 @@
+# pnpm 10 reads build-script approvals from here, not package.json.
+# Prisma needs its postinstall to place the query engine.
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - prisma
+  - esbuild
+  - msgpackr-extract
+ignoredBuiltDependencies:
+  - '@scarf/scarf'
