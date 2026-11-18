@@ -21,7 +21,9 @@ async function bootstrap(): Promise<void> {
   // Validation is per-route with zod schemas (see common/zod.pipe.ts).
 
   const port = Number(process.env.PORT ?? 3001);
-  await app.listen(port);
+  // Bind to all interfaces: hosted runtimes proxy in from outside the
+  // container, so listening only on localhost makes the app unreachable.
+  await app.listen(port, '0.0.0.0');
   new Logger('Amana').log(`API listening on :${port} (payments: ${process.env.PAYMENT_MODE ?? 'fake'})`);
 }
 
