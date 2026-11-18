@@ -45,10 +45,19 @@ export class AuthService {
     const phone = AuthService.normalisePhone(rawPhone);
     const existing = await this.prisma.user.findUnique({ where: { phone } });
     if (existing) {
-      const updated =
-        name && !existing.name
-          ? await this.prisma.user.update({ where: { id: existing.id }, data: { name } })
-          : existing;
+      const patch: { name?: string; email?: string } = {};
+      if (name && !existing.name) patch.name = name;
+      // An account that has never completed a sign-in has no established
+      // owner yet — it is a stub, created by a failed attempt or by a
+      // counterparty naming the number. Letting it take a delivery address is
+      // what makes it reachable at all. Once someone has signed in, the
+      // address is theirs and only a token can change it.
+      if (emailForNewAccount && !existing.email && !existing.verifiedAt) {
+        patch.email = emailForNewAccount;
+      }
+      const updated = Object.keys(patch).length
+        ? await this.prisma.user.update({ where: { id: existing.id }, data: patch })
+        : existing;
       return { id: updated.id, phone: updated.phone, email: updated.email, isNew: false };
     }
     // Only a brand-new account may take a delivery address from the request:
