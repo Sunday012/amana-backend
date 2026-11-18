@@ -1,8 +1,9 @@
 import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import {
   CollectionRequest,
+  FundingEvent,
   CollectionResult,
   CollectionStatus,
   PaymentProvider,
@@ -44,6 +45,13 @@ export class PagaProvider extends PaymentProvider {
 
   private get businessBaseUrl(): string {
     return this.config.get<string>('PAGA_BUSINESS_BASE_URL') ?? 'https://beta.mypaga.com';
+  }
+
+  /** Paga wants a local 11-digit number; we store E.164. */
+  private static localPhone(phone: string): string {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.startsWith('234')) return `0${digits.slice(3)}`;
+    return digits;
   }
 
   /** SHA-512 over the ordered parameters with the hash key appended. */
@@ -144,90 +152,110 @@ export class PagaProvider extends PaymentProvider {
   // ------------------------------------------------------------ money in
 
   /**
-   * Collect payment request. Required by Paga and easy to miss: names for both
-   * parties, a callback URL, a payment method, and the two fee shares, which
-   * must add up to 1.
+   * Money in is a *subsidiary account*: a dedicated Nigerian account number
+   * for this agreement that the buyer transfers into from any bank. Omitting
+   * autoSweep makes it ledger-backed, so Paga holds the funds there until we
+   * move them — which is the escrow property the product depends on.
+   *
+   * Paga's payment-request product is not enabled on this account (every call
+   * returns "system error"), so this is the money-in path.
    */
   async createCollection(req: CollectionRequest): Promise<CollectionResult> {
-    const callBackUrl = this.callbackUrl();
-    if (!callBackUrl) {
-      throw new Error(
-        'PUBLIC_API_URL must be set: Paga requires a callBackUrl on every payment request',
-      );
+    const callbackUrl = this.callbackUrl();
+    if (!callbackUrl) {
+      throw new Error('PUBLIC_API_URL must be set: Paga needs a callback for funding events');
     }
 
-    // Hash and body must agree on the amount exactly as JSON renders it, so
-    // derive both from one number rather than formatting twice.
-    const amount = Number((Number(req.amountMinor) / 100).toFixed(2));
-    const payerEmail = req.payerEmail ?? '';
-
-    // Who absorbs the collection fee. Defaulting the payer to the whole share
-    // means we receive the agreement total intact, so the held balance always
-    // matches what the payout guard expects.
-    const payerFeeShare = Number(this.config.get<string>('PAGA_PAYER_FEE_SHARE') ?? 1);
+    // accountReference must be 11-30 characters and is permanent per account.
+    const accountReference = req.reference.replace(/[^a-zA-Z0-9]/g, '').slice(0, 30);
+    const [firstName, ...rest] = (req.payerName || 'Amana Buyer').trim().split(/\s+/);
+    const lastName = rest.join(' ') || 'Buyer';
 
     const result = await this.collectCall<{
-      referenceNumber?: string;
-      transactionId?: string;
-      paymentUrl?: string;
-      redirectUrl?: string;
+      accountNumber?: string;
+      accountReference?: string;
+      statusMessage?: string;
     }>(
-      '/paymentRequest',
+      '/subsidiary-accounts',
       {
         referenceNumber: req.reference,
-        amount,
-        currency: req.currency,
-        payer: {
-          name: req.payerName,
-          phoneNumber: req.payerPhone,
-          ...(payerEmail ? { email: payerEmail } : {}),
-        },
-        payee: { name: req.payeeName },
-        payerCollectionFeeShare: payerFeeShare,
-        payeeCollectionFeeShare: Number((1 - payerFeeShare).toFixed(2)),
-        callBackUrl,
-        paymentMethods: [this.config.get<string>('PAGA_PAYMENT_METHOD') ?? 'BANK_TRANSFER'],
-        isSuppressMessages: false,
-        narration: req.description.slice(0, 100),
+        accountReference,
+        accountName: req.description.slice(0, 100),
+        firstName,
+        lastName,
+        phoneNumber: PagaProvider.localPhone(req.payerPhone),
+        ...(req.payerEmail ? { email: req.payerEmail } : {}),
+        status: 'ACTIVE',
+        callbackUrl,
+        // No autoSweep: hold the funds rather than settling them out.
       },
-      // referenceNumber + amount + currency + payer.phoneNumber + payer.email
-      [req.reference, String(amount), req.currency, req.payerPhone, payerEmail],
+      // referenceNumber + accountReference + iifiNumber + autoSweep.bankPublicId
+      // + autoSweep.destination + autoSweep.accountNumber + callbackUrl
+      [req.reference, accountReference, '', '', '', '', callbackUrl],
     );
 
     return {
-      reference: result.referenceNumber ?? req.reference,
-      providerRef: result.transactionId ?? req.reference,
-      checkoutUrl: result.paymentUrl ?? result.redirectUrl ?? '',
+      reference: req.reference,
+      providerRef: result.accountReference ?? accountReference,
+      accountNumber: result.accountNumber,
+      bankName: 'Paga',
       settled: false,
     };
   }
 
   /**
-   * The envelope statusCode says whether the lookup worked; data.statusCode
-   * says whether the money actually arrived.
+   * Reading a subsidiary account back is not working on this sandbox yet, so
+   * this reports "could not check" rather than "not paid" — the difference
+   * matters, because the reconciler must not conclude a payment failed just
+   * because the provider is unreachable.
    */
   async getCollectionStatus(reference: string): Promise<CollectionStatus> {
-    const result = await this.collectCall<{
-      data?: {
-        statusCode?: string | number;
-        requestAmount?: number;
-        totalPaymentAmount?: number;
-        currency?: string;
-        transactionId?: string;
+    const accountReference = reference.replace(/[^a-zA-Z0-9]/g, '').slice(0, 30);
+    try {
+      const result = await this.collectCall<{ balance?: number; currency?: string }>(
+        `/subsidiary-accounts/${accountReference}/details`,
+        { accountReference },
+        [accountReference],
+      );
+      return {
+        reference,
+        settled: Number(result.balance ?? 0) > 0,
+        checked: true,
+        amountMinor: BigInt(Math.round(Number(result.balance ?? 0) * 100)),
+        currency: result.currency ?? 'NGN',
+        raw: result as Record<string, unknown>,
       };
-    }>('/status', { referenceNumber: reference }, [reference]);
+    } catch (error) {
+      this.logger.warn(`Could not read subsidiary account ${accountReference}: ${(error as Error).message}`);
+      return {
+        reference,
+        settled: false,
+        checked: false,
+        amountMinor: 0n,
+        currency: 'NGN',
+        raw: { error: (error as Error).message },
+      };
+    }
+  }
 
-    const data = result.data ?? {};
-    const settled = String(data.statusCode ?? '') === '0';
-    const paid = data.totalPaymentAmount ?? 0;
+  /**
+   * Funding callback. The signature covers the transaction, so a forged body
+   * cannot credit an agreement.
+   * hash = SHA-512(transactionReference + transactionDate + amount
+   *                + accountNumber + timestamp + hashKey)
+   */
+  parseFunding(body: Record<string, unknown>): FundingEvent | null {
+    const accountNumber = String(body.accountNumber ?? '');
+    const amount = Number(body.amount ?? 0);
+    if (!accountNumber || !(amount > 0)) return null;
 
     return {
-      reference,
-      settled,
-      amountMinor: BigInt(Math.round(Number(paid) * 100)),
-      currency: data.currency ?? 'NGN',
-      providerTxnId: data.transactionId,
-      raw: result as Record<string, unknown>,
+      accountNumber,
+      amountMinor: BigInt(Math.round(amount * 100)),
+      providerTxnId: String(body.transactionReference ?? ''),
+      eventId: String(
+        body.transactionReference ?? body.fundingTransactionReference ?? `${accountNumber}:${amount}`,
+      ),
     };
   }
 
@@ -292,12 +320,33 @@ export class PagaProvider extends PaymentProvider {
     return base ? `${base}/webhooks/paga` : undefined;
   }
 
+  /**
+   * Funding callbacks carry x-paga-hash-v3, computed the same way as request
+   * hashes: SHA-512 over ordered fields with the hash key appended.
+   */
   verifyWebhook(rawBody: string, headers: Record<string, unknown>): boolean {
-    const secret = this.config.get<string>('PAGA_WEBHOOK_SECRET');
-    if (!secret) return false;
-    const provided = String(headers['x-paga-signature'] ?? headers['hash'] ?? '');
-    const expected = createHmac('sha512', secret).update(rawBody).digest('hex');
-    const a = Buffer.from(provided);
+    const provided = String(
+      headers['x-paga-hash-v3'] ?? headers['x-paga-signature'] ?? headers['hash'] ?? '',
+    );
+    if (!provided) return false;
+
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return false;
+    }
+
+    const timestamp = String(headers['x-paga-timestamp'] ?? body.timestamp ?? '');
+    const expected = this.signature([
+      String(body.transactionReference ?? ''),
+      String(body.transactionDate ?? ''),
+      String(body.amount ?? ''),
+      String(body.accountNumber ?? ''),
+      timestamp,
+    ]);
+
+    const a = Buffer.from(provided.toLowerCase());
     const b = Buffer.from(expected);
     return a.length === b.length && timingSafeEqual(a, b);
   }

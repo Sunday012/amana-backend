@@ -241,6 +241,8 @@ model Payment {
   agreementId     String
   agreement       Agreement     @relation(fields: [agreementId], references: [id], onDelete: Cascade)
   pagaReference   String        @unique
+  /// The Paga subsidiary account the buyer transfers into; funds are held here.
+  virtualAccountNumber String?  @unique
   amount          BigInt
   currency        String        @default("NGN")
   status          PaymentStatus @default(PENDING)

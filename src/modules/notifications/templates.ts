@@ -15,7 +15,9 @@ export const TEMPLATES: Record<string, TemplatePair> = {
   },
   [EVENTS.agreementApproved]: {
     payee: 'The buyer accepted the terms for "{title}". Waiting for payment.',
-    payer: 'Terms accepted for "{title}". Pay {amount} now to fund it: {link}',
+    payer:
+      'Terms accepted for "{title}". Transfer {amount} to {bankName} {accountNumber} to fund it. ' +
+      'Amana holds the money until you confirm delivery. Details: {link}',
   },
   [EVENTS.paymentConfirmed]: {
     payee: 'Payment confirmed. {amount} is held by Amana for "{title}". Hand the item to Chowdeck.',

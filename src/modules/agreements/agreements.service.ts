@@ -208,7 +208,12 @@ export class AgreementsService {
       await this.events.emit({
         event: EVENTS.agreementApproved,
         agreementId,
-        data: { checkoutUrl: collection.checkoutUrl, reference: collection.reference },
+        data: {
+          checkoutUrl: collection.checkoutUrl,
+          reference: collection.reference,
+          accountNumber: collection.accountNumber,
+          bankName: collection.bankName,
+        },
       });
       return this.get(agreementId, userId);
     }

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@10.18.1",
-  "description": "Amana \u2014 agree, verify, pay. One agreement engine for TradeProof orders and milestone contracts.",
+  "description": "Amana — agree, verify, pay. One agreement engine for TradeProof orders and milestone contracts.",
   "scripts": {
     "build": "nest build",
     "start": "nest start",
@@ -32,6 +32,7 @@
     "ioredis": "^5.6.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
+    "yaml": "^2.9.1",
     "zod": "^3.24.2"
   },
   "devDependencies": {

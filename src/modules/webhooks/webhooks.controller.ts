@@ -12,12 +12,18 @@ export class WebhooksController {
 
   @Post('paga')
   @HttpCode(200)
-  paga(
+  async paga(
     @Req() req: Request & { rawBody?: string },
     @Body() body: Record<string, unknown>,
     @Headers() headers: Record<string, unknown>,
   ) {
-    return this.webhooks.handlePaga(req.rawBody ?? JSON.stringify(body), body, headers);
+    const result = await this.webhooks.handlePaga(
+      req.rawBody ?? JSON.stringify(body),
+      body,
+      headers,
+    );
+    // Paga wants this exact acknowledgement, or it retries the callback.
+    return result.accepted ? { status: 'SUCCESS' } : { status: 'FAILED' };
   }
 
   @Post('chowdeck')

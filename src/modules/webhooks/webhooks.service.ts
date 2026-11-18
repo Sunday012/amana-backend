@@ -65,7 +65,9 @@ export class WebhooksService {
   ): Promise<{ accepted: boolean }> {
     const signatureOk = this.paymentProvider.verifyWebhook(rawBody, headers);
     const reference = String(body.referenceNumber ?? body.reference ?? '');
-    const eventId = String(body.transactionId ?? body.eventId ?? reference);
+    const eventId = String(
+      body.transactionReference ?? body.transactionId ?? body.eventId ?? reference,
+    );
 
     const isNew = await this.record('paga', eventId || null, signatureOk, body, headers);
     if (!isNew) return { accepted: true };
@@ -73,7 +75,18 @@ export class WebhooksService {
       this.logger.warn('Rejected Paga webhook with a bad signature');
       return { accepted: false };
     }
-    if (!reference) return { accepted: false };
+
+    // A subsidiary account was funded: the money has landed in escrow.
+    const funding = this.paymentProvider.parseFunding(body);
+    if (funding) {
+      await this.payments.confirmFundingByAccount(
+        funding.accountNumber,
+        funding.amountMinor,
+        funding.providerTxnId,
+        body,
+      );
+      return { accepted: true };
+    }
 
     const payout = await this.prisma.payout.findUnique({ where: { idempotencyKey: reference } });
     if (payout) {
@@ -85,6 +98,8 @@ export class WebhooksService {
       }
       return { accepted: true };
     }
+
+    if (!reference) return { accepted: false };
 
     // Collection callback: confirm funding (callback + server-side status check).
     await this.payments.confirmFunding(reference, body, 'paga');

@@ -38,7 +38,12 @@ export class PaymentsService {
   // ------------------------------------------------------------ collection
 
   /** One payment reference per agreement, generated on buyer acceptance. */
-  async createCollection(agreementId: string): Promise<{ reference: string; checkoutUrl: string }> {
+  async createCollection(agreementId: string): Promise<{
+    reference: string;
+    accountNumber?: string;
+    bankName?: string;
+    checkoutUrl?: string;
+  }> {
     const agreement = await this.prisma.agreement.findUniqueOrThrow({
       where: { id: agreementId },
       include: { payer: true, payee: true, payments: true },
@@ -63,13 +68,19 @@ export class PaymentsService {
       description: agreement.title,
     });
 
-    if (!existing) {
+    if (existing) {
+      await this.prisma.payment.update({
+        where: { id: existing.id },
+        data: { virtualAccountNumber: result.accountNumber ?? existing.virtualAccountNumber },
+      });
+    } else {
       await this.prisma.payment.create({
         data: {
           agreementId,
           pagaReference: reference,
           amount: agreement.totalAmount,
           currency: agreement.currency,
+          virtualAccountNumber: result.accountNumber,
         },
       });
     }
@@ -78,10 +89,92 @@ export class PaymentsService {
       agreementId,
       actor: 'system',
       action: 'payment.collection_created',
-      meta: { reference },
+      meta: { reference, accountNumber: result.accountNumber },
     });
 
-    return { reference, checkoutUrl: result.checkoutUrl };
+    return {
+      reference,
+      // What the buyer actually needs: an account to transfer into.
+      accountNumber: result.accountNumber,
+      bankName: result.bankName,
+      checkoutUrl: result.checkoutUrl,
+    };
+  }
+
+  /**
+   * A verified funding callback credited one of our virtual accounts. The
+   * amount comes from the signed callback, never from a client.
+   */
+  async confirmFundingByAccount(
+    accountNumber: string,
+    amountMinor: bigint,
+    providerTxnId: string,
+    raw: Record<string, unknown>,
+  ): Promise<Payment | null> {
+    const payment = await this.prisma.payment.findFirst({
+      where: { virtualAccountNumber: accountNumber },
+      include: { agreement: true },
+    });
+    if (!payment) {
+      this.logger.warn(`Funding for unknown virtual account ${accountNumber}; ignored`);
+      return null;
+    }
+    if (payment.status === 'CONFIRMED') return payment;
+
+    if (amountMinor !== payment.amount) {
+      // Short or over payment: hold it and let an admin decide rather than
+      // crediting an agreement for the wrong amount.
+      const mismatched = await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: 'MISMATCHED' as PaymentStatus,
+          rawCallbackJson: raw as Prisma.InputJsonValue,
+        },
+      });
+      await this.audit.record({
+        agreementId: payment.agreementId,
+        actor: 'paga',
+        action: 'payment.amount_mismatch',
+        meta: { expected: payment.amount.toString(), received: amountMinor.toString() },
+      });
+      return mismatched;
+    }
+
+    const confirmed = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: 'CONFIRMED' as PaymentStatus,
+          providerTxnId,
+          rawCallbackJson: raw as Prisma.InputJsonValue,
+          confirmedAt: new Date(),
+        },
+      });
+      await tx.ledgerEntry.create({
+        data: {
+          agreementId: payment.agreementId,
+          type: 'HELD',
+          amount: payment.amount,
+          reference: payment.pagaReference,
+          memo: `Held in Paga account ${accountNumber}`,
+        },
+      });
+      await this.transitions.to(
+        payment.agreementId,
+        'FUNDED' as AgreementStatus,
+        { actor: 'paga', action: 'payment.confirmed', evidenceRef: providerTxnId },
+        tx,
+      );
+      return row;
+    });
+
+    await this.events.emit({
+      event: EVENTS.paymentConfirmed,
+      agreementId: payment.agreementId,
+      actor: 'paga',
+      data: { reference: payment.pagaReference },
+    });
+    return confirmed;
   }
 
   /**
@@ -107,6 +200,10 @@ export class PaymentsService {
     }
 
     const status = await this.provider.getCollectionStatus(reference);
+    if (status.checked === false) {
+      this.logger.warn(`Status check unavailable for ${reference}; leaving pending`);
+      return payment;
+    }
     if (!status.settled) {
       await this.prisma.payment.update({
         where: { id: payment.id },

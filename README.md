@@ -115,7 +115,10 @@ output that fails schema validation).
 
 ## API
 
-The full contract is in [`openapi.yaml`](openapi.yaml). The shape the other workstreams build
+**Web app developers: start with [FRONTEND.md](FRONTEND.md)**, and the live interactive docs at
+`/docs` on the deployed instance.
+
+The full contract is in [`openapi.yaml`](openapi.yaml), served as Swagger UI at `/docs`. The shape the other workstreams build
 against:
 
 | Method and path | Purpose | Caller |

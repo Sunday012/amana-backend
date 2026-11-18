@@ -7,6 +7,8 @@ info:
     app and (later) the public API. Money moves only from RELEASABLE, and only
     the backend may call the payout endpoint.
 servers:
+  - url: https://amana-api.favoursunday.dev
+    description: Staging (LiteHost)
   - url: http://localhost:3001
     description: Local
 tags:
@@ -346,8 +348,16 @@ paths:
   /payments/collections:
     post:
       tags: [payments]
-      summary: Create the Paga collection for an agreement
-      description: The amount is read from the stored agreement, never from the request.
+      summary: Create the funding account for an agreement
+      description: >
+        Creates a dedicated Paga account for this agreement. The buyer transfers
+        into it from any bank; Paga holds the funds until release. The amount is
+        read from the stored agreement, never from the request.
+
+
+        Normally you do not call this directly — it runs automatically when the
+        second party approves, and the account number comes back on the
+        agreement.
       security: [{ bearer: [] }]
       requestBody:
         required: true
@@ -357,7 +367,18 @@ paths:
               type: object
               required: [agreementId]
               properties: { agreementId: { type: string, format: uuid } }
-      responses: { '201': { description: reference and checkoutUrl } }
+      responses:
+        '201':
+          description: The account the buyer should pay into
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reference: { type: string, example: AMANA-7c06112a-1763481600000 }
+                  accountNumber: { type: string, example: '1927706374', description: Show this to the buyer }
+                  bankName: { type: string, example: Paga }
+                  checkoutUrl: { type: string, nullable: true, description: Only set by providers with a hosted page }
 
   /payments/{agreementId}:
     get:
@@ -393,9 +414,12 @@ paths:
   /webhooks/paga:
     post:
       tags: [webhooks]
-      summary: Payment and payout callbacks
-      description: Signature verified, raw body stored, duplicates ignored by reference.
-      responses: { '200': { description: '{ accepted: boolean }' } }
+      summary: Funding and payout callbacks
+      description: >
+        Paga posts here when a buyer funds an agreement's account, and when a
+        payout settles. The x-paga-hash-v3 signature is verified, the raw body
+        is stored, and duplicate events are ignored. Not called by the frontend.
+      responses: { '200': { description: '{ status: SUCCESS }' } }
   /webhooks/chowdeck:
     post:
       tags: [webhooks]

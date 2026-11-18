@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import {
   CollectionRequest,
+  FundingEvent,
   CollectionResult,
   CollectionStatus,
   PaymentProvider,
@@ -37,6 +38,9 @@ export class FakePagaProvider extends PaymentProvider {
     return {
       reference: req.reference,
       providerRef: `fake-col-${randomUUID().slice(0, 8)}`,
+      // Mirrors the real flow: the buyer is given an account to pay into.
+      accountNumber: `90${randomUUID().replace(/\D/g, '').padEnd(8, '0').slice(0, 8)}`,
+      bankName: 'Fake Bank',
       checkoutUrl: `${base}/pay/${req.reference}`,
       settled: false,
     };
@@ -66,5 +70,17 @@ export class FakePagaProvider extends PaymentProvider {
 
   verifyWebhook(): boolean {
     return true;
+  }
+
+  parseFunding(body: Record<string, unknown>): FundingEvent | null {
+    const accountNumber = String(body.accountNumber ?? '');
+    const amount = Number(body.amount ?? 0);
+    if (!accountNumber || !(amount > 0)) return null;
+    return {
+      accountNumber,
+      amountMinor: BigInt(Math.round(amount * 100)),
+      providerTxnId: String(body.transactionReference ?? `fake-${randomUUID().slice(0, 8)}`),
+      eventId: String(body.transactionReference ?? randomUUID()),
+    };
   }
 }
