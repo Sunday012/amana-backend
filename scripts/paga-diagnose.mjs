@@ -83,4 +83,31 @@ await probe(
   },
 );
 
+// 4 & 5. Subsidiary (persistent) accounts — a ledger-backed account that HOLDS
+// funds is exactly the escrow primitive we want. Basic auth suggests the
+// Collect host, but try both since the docs omit the base URL.
+const accountRef = `amana${Date.now()}`.slice(0, 20);
+const callbackUrl = `${env.PUBLIC_API_URL ?? 'https://example.com'}/webhooks/paga`;
+const subsidiaryBody = {
+  referenceNumber: ref,
+  accountReference: accountRef,
+  accountName: 'Amana Test Escrow',
+  callbackUrl,
+};
+// referenceNumber + accountReference + iifiNumber + autoSweep.bankPublicId
+// + autoSweep.destination + autoSweep.accountNumber + callbackUrl
+const subsidiaryHash = hash([ref, accountRef, '', '', '', '', callbackUrl]);
+
+for (const [label, base] of [
+  ['4. Subsidiary account on COLLECT host', collect],
+  ['5. Subsidiary account on BUSINESS host', business],
+]) {
+  await probe(
+    label,
+    `${base}/subsidiary-accounts`,
+    { Authorization: `Basic ${basic}`, hash: subsidiaryHash },
+    subsidiaryBody,
+  );
+}
+
 console.log('\nDone.');
