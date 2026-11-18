@@ -15,7 +15,7 @@ async function main(): Promise<void> {
     { phone: '+2348010000003', name: 'Grace (client)', isBuyer: true },
     { phone: '+2348010000004', name: 'David (freelancer)', isSeller: true, payoutRef: '+2348010000004' },
     { phone: '+2348010000009', name: 'Amana admin', isAdmin: true },
-  ].map((person) => ({ ...person, email: demoEmail }));
+  ].map((person) => (demoEmail ? { ...person, email: demoEmail } : person));
 
   for (const person of people) {
     await prisma.user.upsert({

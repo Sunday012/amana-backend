@@ -19,7 +19,7 @@ await fetch(`${API}/auth/otp/request`, {
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ phone: '+2348010000001', email: 'buyer@example.com' }),
 });
-// emailed:       { "sent": true,  "channel": "email" }
+// emailed:       { "sent": true,  "channel": "email", "sentTo": "s•••@g•••.com" }
 // nowhere to go: { "sent": false, "channel": "log", "needsEmail": true }
 
 // 2. exchange it for a token
@@ -56,11 +56,16 @@ await fetch(`${API}/auth/me/email`, {
 That restriction is deliberate: if the sign-in request could name the delivery address, anyone could
 ask for a code for someone else's phone number and have it sent to themselves.
 
+**Show `sentTo`, not the address the user typed.** For an existing account the typed value is
+ignored and the code goes to the stored address — so echoing the input tells the user to watch an
+inbox that will never receive anything. `sentTo` is masked (`s•••@g•••.com`), which is enough for
+the owner to recognise.
+
 Read `channel` to decide what to tell the user:
 
 | Response | Meaning | Show |
 | --- | --- | --- |
-| `sent: true, channel: "email"` | The code was emailed | "We sent a code to your email" |
+| `sent: true, channel: "email"` | The code was emailed | "We sent a code to {sentTo}" |
 | `sent: false, channel: "log"` | No delivery address, code is in the server log | Dev-only banner with `debugCode` |
 
 **`debugCode` only appears while `OTP_DEBUG=true`**, which is a development setting — it lets anyone

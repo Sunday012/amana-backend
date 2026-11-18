@@ -89,6 +89,8 @@ export class AuthService {
   ): Promise<{
     sent: boolean;
     channel: 'email' | 'log';
+    /** Masked, so the UI can say where it went without revealing the address. */
+    sentTo?: string;
     needsEmail?: boolean;
     debugCode?: string;
   }> {
@@ -114,7 +116,9 @@ export class AuthService {
         })
       : false;
 
-    if (delivered) return { sent: true, channel: 'email' };
+    if (delivered) {
+      return { sent: true, channel: 'email', sentTo: AuthService.maskEmail(destination!) };
+    }
 
     // An existing account with nowhere to send: we will not accept a delivery
     // address from the request, because that is how an account gets hijacked.
@@ -168,6 +172,18 @@ export class AuthService {
 
   publicUser(user: { id: string; phone: string; name: string | null; isAdmin: boolean }) {
     return { id: user.id, phone: user.phone, name: user.name, isAdmin: user.isAdmin };
+  }
+
+  /**
+   * j•••@g•••.com — enough for the owner to recognise, not enough for someone
+   * who merely knows the phone number to learn the address.
+   */
+  static maskEmail(email: string): string {
+    const [local, domain] = email.split('@');
+    if (!domain) return '•••';
+    const [host, ...rest] = domain.split('.');
+    const keep = (part: string) => (part ? `${part[0]}•••` : '•••');
+    return `${keep(local)}@${keep(host)}${rest.length ? `.${rest.join('.')}` : ''}`;
   }
 
   private static hash(code: string): string {
