@@ -80,7 +80,20 @@ paths:
               required: [phone]
               properties: { phone: { type: string, example: '+2348010000001' } }
       responses:
-        '201': { description: Code sent; debugCode is returned only when OTP_DEBUG=true }
+        '201':
+          description: >
+            The code is delivered to the address stored on the account. The
+            request cannot name a destination — that would let anyone redirect
+            another user's code. debugCode appears only when nothing could
+            deliver it and OTP_DEBUG=true.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sent: { type: boolean }
+                  channel: { type: string, enum: [email, log] }
+                  debugCode: { type: string, nullable: true }
   /auth/otp/verify:
     post:
       tags: [auth]
@@ -103,6 +116,21 @@ paths:
       tags: [auth]
       security: [{ bearer: [] }]
       responses: { '200': { description: The signed-in user } }
+  /auth/me/email:
+    patch:
+      tags: [auth]
+      summary: Set where this account's login codes are delivered
+      description: Requires a token, so only the account holder can point codes elsewhere.
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties: { email: { type: string, format: email } }
+      responses: { '200': { description: The stored address } }
 
   /agreements:
     post:

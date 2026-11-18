@@ -13,11 +13,11 @@ Everything below is already live. You do not need the backend running locally.
 Phone OTP only — there are no passwords and no sign-up screen. A user is created on first contact.
 
 ```ts
-// 1. ask for a code. Pass an email to have it delivered there.
+// 1. ask for a code
 await fetch(`${API}/auth/otp/request`, {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ phone: '+2348010000001', email: 'buyer@example.com' }),
+  body: JSON.stringify({ phone: '+2348010000001' }),
 });
 // emailed:     { "sent": true,  "channel": "email" }
 // not emailed: { "sent": false, "channel": "log", "debugCode": "527448" }
@@ -32,8 +32,22 @@ const { token, user } = await fetch(`${API}/auth/otp/verify`, {
 
 Send `Authorization: Bearer <token>` on every other call. Tokens last 7 days.
 
-The phone number is the identity; **the email is only a delivery address** for the code. Pass it on
-the first sign-in and it is stored against the user, so later sign-ins need the phone number alone.
+The phone number is the identity; **the email is only a delivery address** for the code, and it is a
+property of the account — not something the sign-in request can set. Codes go to whatever address is
+already stored on that user.
+
+To add or change one, the user must already be signed in:
+
+```ts
+await fetch(`${API}/auth/me/email`, {
+  method: 'PATCH',
+  headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+  body: JSON.stringify({ email: 'buyer@example.com' }),
+});
+```
+
+That restriction is deliberate: if the sign-in request could name the delivery address, anyone could
+ask for a code for someone else's phone number and have it sent to themselves.
 
 Read `channel` to decide what to tell the user:
 

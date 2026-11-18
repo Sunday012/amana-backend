@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards, UsePipes } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, UseGuards, UsePipes } from '@nestjs/common';
 import { z } from 'zod';
 import { AuthUser, CurrentUser } from '../../common/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards';
@@ -6,11 +6,8 @@ import { ZodValidationPipe } from '../../common/zod.pipe';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from './auth.service';
 
-const requestOtpSchema = z.object({
-  phone: z.string().min(7),
-  /** Optional: where to deliver the code. Stored on first use. */
-  email: z.string().email().optional(),
-});
+const requestOtpSchema = z.object({ phone: z.string().min(7) });
+const setEmailSchema = z.object({ email: z.string().email() });
 const verifyOtpSchema = z.object({ phone: z.string().min(7), code: z.string().length(6) });
 
 @Controller('auth')
@@ -23,7 +20,7 @@ export class AuthController {
   @Post('otp/request')
   @UsePipes(new ZodValidationPipe(requestOtpSchema))
   requestOtp(@Body() body: z.infer<typeof requestOtpSchema>) {
-    return this.auth.requestOtp(body.phone, body.email);
+    return this.auth.requestOtp(body.phone);
   }
 
   @Post('otp/verify')
@@ -36,6 +33,17 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async me(@CurrentUser() user: AuthUser) {
     const row = await this.prisma.user.findUniqueOrThrow({ where: { id: user.id } });
-    return this.auth.publicUser(row);
+    return { ...this.auth.publicUser(row), email: row.email };
+  }
+
+  /**
+   * Choose where this account's login codes are delivered. Requires a token,
+   * so only someone who already passed an OTP can point them somewhere new.
+   */
+  @Patch('me/email')
+  @UseGuards(JwtAuthGuard)
+  @UsePipes(new ZodValidationPipe(setEmailSchema))
+  setEmail(@CurrentUser() user: AuthUser, @Body() body: z.infer<typeof setEmailSchema>) {
+    return this.auth.setEmail(user.id, body.email);
   }
 }

@@ -30,34 +30,48 @@ export class AuthService {
 
   /**
    * Creates the user on first contact (bots do this too). The phone number is
-   * the identity; an email is optional and only used to deliver login codes.
+   * the identity.
+   *
+   * Note what this deliberately does NOT take: an email. A delivery address
+   * can only be set by someone already signed in (see setEmail), because a
+   * caller-supplied address would let anyone redirect another user's login
+   * code to themselves.
    */
   async findOrCreateByPhone(
     rawPhone: string,
     name?: string,
-    email?: string,
   ): Promise<{ id: string; phone: string; email: string | null }> {
     const phone = AuthService.normalisePhone(rawPhone);
     const existing = await this.prisma.user.findUnique({ where: { phone } });
     if (existing) {
-      // Fill in details we did not have before, but never overwrite them.
-      const patch: { name?: string; email?: string } = {};
-      if (name && !existing.name) patch.name = name;
-      if (email && !existing.email) patch.email = email;
-      const updated = Object.keys(patch).length
-        ? await this.prisma.user.update({ where: { id: existing.id }, data: patch })
-        : existing;
+      const updated =
+        name && !existing.name
+          ? await this.prisma.user.update({ where: { id: existing.id }, data: { name } })
+          : existing;
       return { id: updated.id, phone: updated.phone, email: updated.email };
     }
-    const created = await this.prisma.user.create({ data: { phone, name, email } });
+    const created = await this.prisma.user.create({ data: { phone, name } });
     return { id: created.id, phone: created.phone, email: created.email };
+  }
+
+  /**
+   * Sets where this user's login codes go. Only callable with a valid token,
+   * which can only be obtained by passing an OTP — so an address can only be
+   * attached by someone who already controls the account.
+   */
+  async setEmail(userId: string, email: string): Promise<{ email: string }> {
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: { email },
+    });
+    this.logger.log(`Delivery address updated for ${updated.phone}`);
+    return { email: updated.email! };
   }
 
   async requestOtp(
     rawPhone: string,
-    email?: string,
   ): Promise<{ sent: boolean; channel: 'email' | 'log'; debugCode?: string }> {
-    const user = await this.findOrCreateByPhone(rawPhone, undefined, email);
+    const user = await this.findOrCreateByPhone(rawPhone);
     const code = randomInt(100000, 999999).toString();
     await this.prisma.otpCode.create({
       data: {
@@ -67,7 +81,8 @@ export class AuthService {
       },
     });
 
-    const destination = email ?? user.email;
+    // Only ever the address stored on the account.
+    const destination = user.email;
     const delivered = destination
       ? await this.email.send({
           to: destination,
