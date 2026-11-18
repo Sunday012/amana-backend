@@ -6,7 +6,11 @@ import { ZodValidationPipe } from '../../common/zod.pipe';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from './auth.service';
 
-const requestOtpSchema = z.object({ phone: z.string().min(7) });
+const requestOtpSchema = z.object({
+  phone: z.string().min(7),
+  /** Optional: where to deliver the code. Stored on first use. */
+  email: z.string().email().optional(),
+});
 const verifyOtpSchema = z.object({ phone: z.string().min(7), code: z.string().length(6) });
 
 @Controller('auth')
@@ -19,7 +23,7 @@ export class AuthController {
   @Post('otp/request')
   @UsePipes(new ZodValidationPipe(requestOtpSchema))
   requestOtp(@Body() body: z.infer<typeof requestOtpSchema>) {
-    return this.auth.requestOtp(body.phone);
+    return this.auth.requestOtp(body.phone, body.email);
   }
 
   @Post('otp/verify')

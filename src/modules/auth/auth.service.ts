@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, UnauthorizedException } from '
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomInt } from 'node:crypto';
+import { EmailSender } from '../../providers/email/email.sender';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const OTP_TTL_MINUTES = 10;
@@ -15,6 +16,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly email: EmailSender,
   ) {}
 
   /** Normalises Nigerian numbers to E.164 so chat and web resolve to one user. */
@@ -26,22 +28,36 @@ export class AuthService {
     return `+${digits}`;
   }
 
-  /** Creates the user on first contact (bots do this too). */
-  async findOrCreateByPhone(rawPhone: string, name?: string): Promise<{ id: string; phone: string }> {
+  /**
+   * Creates the user on first contact (bots do this too). The phone number is
+   * the identity; an email is optional and only used to deliver login codes.
+   */
+  async findOrCreateByPhone(
+    rawPhone: string,
+    name?: string,
+    email?: string,
+  ): Promise<{ id: string; phone: string; email: string | null }> {
     const phone = AuthService.normalisePhone(rawPhone);
     const existing = await this.prisma.user.findUnique({ where: { phone } });
     if (existing) {
-      if (name && !existing.name) {
-        await this.prisma.user.update({ where: { id: existing.id }, data: { name } });
-      }
-      return { id: existing.id, phone: existing.phone };
+      // Fill in details we did not have before, but never overwrite them.
+      const patch: { name?: string; email?: string } = {};
+      if (name && !existing.name) patch.name = name;
+      if (email && !existing.email) patch.email = email;
+      const updated = Object.keys(patch).length
+        ? await this.prisma.user.update({ where: { id: existing.id }, data: patch })
+        : existing;
+      return { id: updated.id, phone: updated.phone, email: updated.email };
     }
-    const created = await this.prisma.user.create({ data: { phone, name } });
-    return { id: created.id, phone: created.phone };
+    const created = await this.prisma.user.create({ data: { phone, name, email } });
+    return { id: created.id, phone: created.phone, email: created.email };
   }
 
-  async requestOtp(rawPhone: string): Promise<{ sent: true; debugCode?: string }> {
-    const user = await this.findOrCreateByPhone(rawPhone);
+  async requestOtp(
+    rawPhone: string,
+    email?: string,
+  ): Promise<{ sent: boolean; channel: 'email' | 'log'; debugCode?: string }> {
+    const user = await this.findOrCreateByPhone(rawPhone, undefined, email);
     const code = randomInt(100000, 999999).toString();
     await this.prisma.otpCode.create({
       data: {
@@ -51,12 +67,28 @@ export class AuthService {
       },
     });
 
-    if (this.config.get('OTP_DEBUG') === 'true') {
-      this.logger.warn(`OTP for ${user.phone}: ${code}`);
-      return { sent: true, debugCode: code };
-    }
-    // Production sends over WhatsApp; the sender lives in the notifications module.
-    return { sent: true };
+    const destination = email ?? user.email;
+    const delivered = destination
+      ? await this.email.send({
+          to: destination,
+          subject: `${code} is your Amana code`,
+          text:
+            `Your Amana login code is ${code}.\n\n` +
+            `It expires in ${OTP_TTL_MINUTES} minutes. If you did not ask to sign in, ignore this email.`,
+        })
+      : false;
+
+    if (delivered) return { sent: true, channel: 'email' };
+
+    // Nothing could deliver it. Log it so development still works, and only
+    // return it in the response when OTP_DEBUG is explicitly on — that flag
+    // lets anyone sign in as anyone, so it must never be set in production.
+    this.logger.warn(`OTP for ${user.phone}: ${code}`);
+    return {
+      sent: false,
+      channel: 'log',
+      ...(this.config.get('OTP_DEBUG') === 'true' ? { debugCode: code } : {}),
+    };
   }
 
   async verifyOtp(rawPhone: string, code: string): Promise<{ token: string; user: unknown }> {

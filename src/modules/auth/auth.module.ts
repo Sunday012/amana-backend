@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { AdminGuard, AgreementPartyGuard, InternalOnlyGuard, JwtAuthGuard } from '../../common/guards';
+import { EmailSender } from '../../providers/email/email.sender';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 
@@ -18,7 +19,22 @@ import { AuthService } from './auth.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtAuthGuard, AdminGuard, AgreementPartyGuard, InternalOnlyGuard],
-  exports: [AuthService, JwtModule, JwtAuthGuard, AdminGuard, AgreementPartyGuard, InternalOnlyGuard],
+  providers: [
+    AuthService,
+    EmailSender,
+    JwtAuthGuard,
+    AdminGuard,
+    AgreementPartyGuard,
+    InternalOnlyGuard,
+  ],
+  exports: [
+    AuthService,
+    EmailSender,
+    JwtModule,
+    JwtAuthGuard,
+    AdminGuard,
+    AgreementPartyGuard,
+    InternalOnlyGuard,
+  ],
 })
 export class AuthModule {}

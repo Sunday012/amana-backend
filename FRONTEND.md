@@ -13,13 +13,14 @@ Everything below is already live. You do not need the backend running locally.
 Phone OTP only — there are no passwords and no sign-up screen. A user is created on first contact.
 
 ```ts
-// 1. ask for a code
+// 1. ask for a code. Pass an email to have it delivered there.
 await fetch(`${API}/auth/otp/request`, {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ phone: '+2348010000001' }),
+  body: JSON.stringify({ phone: '+2348010000001', email: 'buyer@example.com' }),
 });
-// -> { "sent": true, "debugCode": "527448" }   debugCode only while OTP_DEBUG=true
+// emailed:     { "sent": true,  "channel": "email" }
+// not emailed: { "sent": false, "channel": "log", "debugCode": "527448" }
 
 // 2. exchange it for a token
 const { token, user } = await fetch(`${API}/auth/otp/verify`, {
@@ -31,9 +32,19 @@ const { token, user } = await fetch(`${API}/auth/otp/verify`, {
 
 Send `Authorization: Bearer <token>` on every other call. Tokens last 7 days.
 
-**While we are on the sandbox, `debugCode` is returned in the response** so you can build without
-WhatsApp delivery. That will go away before launch — do not build a UI that depends on it. Show a
-normal "enter the code we sent you" screen and read the code from the response only in dev.
+The phone number is the identity; **the email is only a delivery address** for the code. Pass it on
+the first sign-in and it is stored against the user, so later sign-ins need the phone number alone.
+
+Read `channel` to decide what to tell the user:
+
+| Response | Meaning | Show |
+| --- | --- | --- |
+| `sent: true, channel: "email"` | The code was emailed | "We sent a code to your email" |
+| `sent: false, channel: "log"` | No delivery address, code is in the server log | Dev-only banner with `debugCode` |
+
+**`debugCode` only appears while `OTP_DEBUG=true`**, which is a development setting — it lets anyone
+sign in as anyone. Do not build a UI that depends on it; show a normal "enter the code" screen and
+read `debugCode` only in dev.
 
 ### Demo accounts (already seeded)
 
