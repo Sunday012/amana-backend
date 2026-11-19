@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import {
+  AccountCheck,
+  Bank,
   CollectionRequest,
   FundingEvent,
   CollectionResult,
@@ -67,6 +69,18 @@ export class FakePagaProvider extends PaymentProvider {
       providerRef: `fake-payout-${req.idempotencyKey.slice(0, 12)}`,
       raw: { mode: 'fake', recipient: req.recipient, amount: req.amountMinor.toString() },
     };
+  }
+
+  async listBanks(): Promise<Bank[]> {
+    return [
+      { uuid: 'fake-bank-gtb', name: 'GTBank (test)' },
+      { uuid: 'fake-bank-zenith', name: 'Zenith Bank (test)' },
+      { uuid: 'fake-bank-access', name: 'Access Bank (test)' },
+    ];
+  }
+
+  async checkAccount(bankUuid: string, accountNumber: string): Promise<AccountCheck> {
+    return { accountName: 'TEST ACCOUNT HOLDER', bankUuid, accountNumber };
   }
 
   verifyWebhook(): boolean {

@@ -2,6 +2,8 @@ import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import {
+  AccountCheck,
+  Bank,
   CollectionRequest,
   FundingEvent,
   CollectionResult,
@@ -378,6 +380,47 @@ export class PagaProvider extends PaymentProvider {
         raw: { error: (error as Error).message },
       };
     }
+  }
+
+  /**
+   * Paga's bank list. UUIDs are stable, so this is cheap to cache; we fetch on
+   * demand because the list only matters while someone is choosing.
+   */
+  async listBanks(): Promise<Bank[]> {
+    const reference = `BANKS-${Date.now()}`;
+    const result = await this.businessCall<{ banks?: { uuid: string; name: string }[] }>(
+      'getBanks',
+      { referenceNumber: reference },
+      [reference],
+    );
+    return (result.banks ?? []).map((b) => ({ uuid: b.uuid, name: b.name }));
+  }
+
+  /**
+   * Confirms the account before we ever send money to it. The name the bank
+   * holds is shown back to the payee: paying the wrong account is not
+   * recoverable, so a human has to recognise it first.
+   */
+  async checkAccount(bankUuid: string, accountNumber: string): Promise<AccountCheck> {
+    const reference = `VAL-${Date.now()}`;
+    // A nominal amount: we are checking the account exists, not moving money.
+    const amount = '100.00';
+    const result = await this.businessCall<{ destinationAccountHolderNameAtBank?: string }>(
+      'validateDepositToBank',
+      {
+        referenceNumber: reference,
+        amount,
+        currency: 'NGN',
+        destinationBankUUID: bankUuid,
+        destinationBankAccountNumber: accountNumber,
+      },
+      // referenceNumber + amount + destinationBankUUID + destinationBankAccountNumber
+      [reference, amount, bankUuid, accountNumber],
+    );
+
+    const accountName = result.destinationAccountHolderNameAtBank?.trim();
+    if (!accountName) throw new Error('That account could not be verified with the bank');
+    return { accountName, bankUuid, accountNumber };
   }
 
   private callbackUrl(): string | undefined {

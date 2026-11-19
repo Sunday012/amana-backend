@@ -64,6 +64,18 @@ export interface PayoutResult {
   raw: Record<string, unknown>;
 }
 
+export interface Bank {
+  uuid: string;
+  name: string;
+}
+
+export interface AccountCheck {
+  /** The name the bank holds for this account, for the payee to confirm. */
+  accountName: string;
+  bankUuid: string;
+  accountNumber: string;
+}
+
 /** What a provider's funding webhook told us, once verified. */
 export interface FundingEvent {
   /** The account the money landed in. */
@@ -77,6 +89,10 @@ export abstract class PaymentProvider {
   abstract createCollection(req: CollectionRequest): Promise<CollectionResult>;
   abstract getCollectionStatus(reference: string): Promise<CollectionStatus>;
   abstract sendPayout(req: PayoutRequest): Promise<PayoutResult>;
+  /** Banks a payout can be sent to. */
+  abstract listBanks(): Promise<Bank[]>;
+  /** Confirms an account exists and returns the name the bank holds for it. */
+  abstract checkAccount(bankUuid: string, accountNumber: string): Promise<AccountCheck>;
   abstract verifyWebhook(rawBody: string, headers: Record<string, unknown>): boolean;
   /** Pulls a funding event out of the provider's webhook body, or null. */
   abstract parseFunding(body: Record<string, unknown>): FundingEvent | null;

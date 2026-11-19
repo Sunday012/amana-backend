@@ -171,7 +171,31 @@ exactly to the total; the API rejects it otherwise with a 400 naming the mismatc
 
 ---
 
-## 4. Polling, not sockets
+## 4. Getting the seller paid
+
+Money reaches a seller by **bank transfer**, so Amana needs their account — a phone number and an
+email are not enough. Nothing collects this automatically, so the web app has to.
+
+```ts
+await fetch(`${API}/payouts/banks`, { headers })            // bank picker options
+await fetch(`${API}/payouts/account`, { headers })          // { ready, accountName? }
+
+await fetch(`${API}/payouts/account`, {                     // verify and save
+  method: 'PUT', headers,
+  body: JSON.stringify({ bankUuid, accountNumber }),
+})
+// -> { accountName: "ADEBAYO TUNDE", bankUuid, accountNumber }
+```
+
+**Show `accountName` back to the user and make them confirm it.** It is the name the bank holds for
+that account, not something they typed. Paying the wrong account cannot be undone, so a person has
+to recognise the name before it is relied on.
+
+Prompt for this the first time someone is about to be owed money — creating an order or accepting a
+contract — rather than at sign-up, where it is friction before any value. Until it is set,
+`POST /payouts` refuses with `NO_PAYOUT_ACCOUNT`.
+
+## 5. Polling, not sockets
 
 There are no websockets. State changes arrive from providers, so poll `GET /agreements/:id` every
 3–5 seconds on any screen that is waiting (funding, delivery, payout). `GET /agreements/:id/timeline`
@@ -180,7 +204,7 @@ so you can treat it as an immutable list.
 
 ---
 
-## 5. Errors
+## 6. Errors
 
 Standard Nest shapes:
 
@@ -198,7 +222,7 @@ approving twice, paying out from the wrong state, disputing after payout started
 
 ---
 
-## 6. What is mocked right now
+## 7. What is mocked right now
 
 | | State |
 | --- | --- |

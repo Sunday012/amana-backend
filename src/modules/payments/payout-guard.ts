@@ -9,6 +9,8 @@ export interface PayoutGuardInput {
   requestedAmount: bigint;
   /** Payee on the stored agreement. */
   agreementRecipient: string | null;
+  /** Whether the payee has a verified bank account on file. */
+  recipientBankOnFile?: boolean;
   /** Recipient resolved for this payout. */
   requestedRecipient: string | null;
   /** A payout row already SENT for this agreement/milestone. */
@@ -21,6 +23,7 @@ export type GuardFailure =
   | 'AMOUNT_EXCEEDS_HELD'
   | 'RECIPIENT_MISMATCH'
   | 'NO_RECIPIENT'
+  | 'NO_PAYOUT_ACCOUNT'
   | 'ALREADY_PAID';
 
 /**
@@ -32,6 +35,9 @@ export function checkPayoutGuard(input: PayoutGuardInput): GuardFailure | null {
   if (input.disputeLock) return 'DISPUTE_LOCK';
   if (input.status !== ('RELEASABLE' as AgreementStatus)) return 'NOT_RELEASABLE';
   if (!input.requestedRecipient || !input.agreementRecipient) return 'NO_RECIPIENT';
+  // Money cannot reach a phone number. Without a verified bank account the
+  // payout would fail at the provider, so refuse here where we can explain it.
+  if (input.recipientBankOnFile === false) return 'NO_PAYOUT_ACCOUNT';
   if (input.requestedRecipient !== input.agreementRecipient) return 'RECIPIENT_MISMATCH';
   if (input.requestedAmount <= 0n || input.requestedAmount > input.heldAmount) {
     return 'AMOUNT_EXCEEDS_HELD';

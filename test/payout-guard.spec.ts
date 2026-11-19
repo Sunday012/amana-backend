@@ -62,3 +62,17 @@ describe('payout guard', () => {
     );
   });
 });
+
+describe('payout account on file', () => {
+  it('refuses when the payee has no verified bank account', () => {
+    expect(checkPayoutGuard({ ...base, recipientBankOnFile: false })).toBe('NO_PAYOUT_ACCOUNT');
+  });
+
+  it('allows when one is on file', () => {
+    expect(checkPayoutGuard({ ...base, recipientBankOnFile: true })).toBeNull();
+  });
+
+  it('still refuses a disputed payout even with an account on file', () => {
+    expect(checkPayoutGuard({ ...base, recipientBankOnFile: true, disputeLock: true })).toBe('DISPUTE_LOCK');
+  });
+})

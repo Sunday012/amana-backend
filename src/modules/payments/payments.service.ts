@@ -319,6 +319,7 @@ export class PaymentsService {
       requestedAmount: amount,
       agreementRecipient: agreement.payee.payoutRef ?? agreement.payee.phone,
       requestedRecipient: agreement.payee.payoutRef ?? agreement.payee.phone,
+      recipientBankOnFile: Boolean(agreement.payee.payoutBankUuid && agreement.payee.payoutRef),
       alreadyPaid,
     });
 
@@ -531,6 +532,48 @@ export class PaymentsService {
       action: 'payment.refunded',
       meta: { amount: refundable.toString(), providerStatus: result.status },
     });
+  }
+
+  // ------------------------------------------------------- payout details
+
+  listBanks() {
+    return this.provider.listBanks();
+  }
+
+  /**
+   * Confirms an account with the bank and stores it against the user. We keep
+   * the name the bank returned, not one the user typed, so a receipt can show
+   * who was actually paid.
+   */
+  async setPayoutAccount(
+    userId: string,
+    bankUuid: string,
+    accountNumber: string,
+  ): Promise<{ accountName: string; bankUuid: string; accountNumber: string }> {
+    const check = await this.provider.checkAccount(bankUuid, accountNumber);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        payoutRef: check.accountNumber,
+        payoutBankUuid: check.bankUuid,
+        payoutAccountName: check.accountName,
+      },
+    });
+    await this.auditIfAny(userId, check);
+    return check;
+  }
+
+  /** Payout details are account-level, so there is no agreement to log against. */
+  private async auditIfAny(userId: string, check: { accountName: string }): Promise<void> {
+    this.logger.log(`Payout account set for ${userId}: ${check.accountName}`);
+  }
+
+  /** Whether this user can be paid at all. */
+  async payoutReadiness(userId: string): Promise<{ ready: boolean; accountName?: string }> {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    return user.payoutBankUuid && user.payoutRef
+      ? { ready: true, accountName: user.payoutAccountName ?? undefined }
+      : { ready: false };
   }
 
   // ----------------------------------------------------------- read models

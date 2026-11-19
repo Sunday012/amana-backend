@@ -416,6 +416,70 @@ paths:
       parameters: [{ in: path, name: agreementId, required: true, schema: { type: string } }]
       responses: { '200': { description: payments, payouts, ledger, balance } }
 
+  /payouts/banks:
+    get:
+      tags: [payments]
+      summary: Banks a payout can be sent to
+      security: [{ bearer: [] }]
+      responses:
+        '200':
+          description: Bank list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    uuid: { type: string }
+                    name: { type: string }
+
+  /payouts/account:
+    get:
+      tags: [payments]
+      summary: Whether the signed-in user can be paid yet
+      security: [{ bearer: [] }]
+      responses:
+        '200':
+          description: Readiness
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ready: { type: boolean }
+                  accountName: { type: string, nullable: true }
+    put:
+      tags: [payments]
+      summary: Confirm a bank account and save it for payouts
+      description: >
+        Validates the account with the bank and returns the name the bank holds
+        for it. Show that name to the user before relying on it — paying the
+        wrong account is not recoverable.
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bankUuid, accountNumber]
+              properties:
+                bankUuid: { type: string }
+                accountNumber: { type: string, example: '0123456789' }
+      responses:
+        '200':
+          description: The verified account
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accountName: { type: string, example: ADEBAYO TUNDE }
+                  bankUuid: { type: string }
+                  accountNumber: { type: string }
+        '502': { description: The bank could not verify that account }
+
   /payouts:
     post:
       tags: [payments]

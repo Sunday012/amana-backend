@@ -119,6 +119,8 @@ model User {
   isBuyer    Boolean  @default(false)
   payoutRef  String? // Destination account number for payouts
   payoutBankUuid String? // Paga's UUID for that bank (required by depositToBank)
+  /// The name the bank holds for that account, as returned by validation.
+  payoutAccountName String?
   verifiedAt DateTime?
   createdAt  DateTime @default(now())
 
