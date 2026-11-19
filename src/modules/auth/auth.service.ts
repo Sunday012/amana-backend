@@ -116,8 +116,18 @@ export class AuthService {
         })
       : false;
 
+    // OTP_DEBUG is an explicit development switch, so the code is returned
+    // whatever happens. Returning it only when delivery failed looked safer but
+    // silently broke every tool that reads it the moment email started working.
+    const debug = this.config.get('OTP_DEBUG') === 'true' ? { debugCode: code } : {};
+
     if (delivered) {
-      return { sent: true, channel: 'email', sentTo: AuthService.maskEmail(destination!) };
+      return {
+        sent: true,
+        channel: 'email',
+        sentTo: AuthService.maskEmail(destination!),
+        ...debug,
+      };
     }
 
     // An existing account with nowhere to send: we will not accept a delivery
@@ -133,7 +143,7 @@ export class AuthService {
       sent: false,
       channel: 'log',
       ...(needsEmail ? { needsEmail: true } : {}),
-      ...(this.config.get('OTP_DEBUG') === 'true' ? { debugCode: code } : {}),
+      ...debug,
     };
   }
 
