@@ -20,6 +20,7 @@ import {
   compileSchema,
   confirmSchema,
   createMilestoneAgreementSchema,
+  createPurchaseSchema,
   createTradeSchema,
   deliverySchema,
   disputeSchema,
@@ -43,6 +44,15 @@ export class AgreementsController {
     @Body(new ZodValidationPipe(createTradeSchema)) body: z.infer<typeof createTradeSchema>,
   ) {
     return serialize(await this.agreements.createTrade(user.id, body));
+  }
+
+  /** Create a TRADE agreement from a listing (buyer). Amana Plug calls this. */
+  @Post('purchases')
+  async createPurchase(
+    @CurrentUser() user: AuthUser,
+    @Body(new ZodValidationPipe(createPurchaseSchema)) body: z.infer<typeof createPurchaseSchema>,
+  ) {
+    return serialize(await this.agreements.createPurchase(user.id, body));
   }
 
   /** Create a MILESTONE agreement, typically from compiled terms. */

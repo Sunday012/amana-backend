@@ -18,6 +18,25 @@ export const createTradeSchema = z.object({
 });
 export type CreateTradeDto = z.infer<typeof createTradeSchema>;
 
+/**
+ * A buyer acting on a published listing. The seller is named by phone rather
+ * than being the caller, and there is no pickup address because the listing
+ * already carries one.
+ */
+export const createPurchaseSchema = z.object({
+  title: z.string().min(2).max(140),
+  amount: amountMinor,
+  currency: z.string().length(3).default('NGN'),
+  sellerPhone: z.string().min(7),
+  deliveryTerms: z.string().max(500).optional(),
+  dropoffAddress: z.string().max(300).optional(),
+  /** Which listing this came from, kept on the terms for the audit trail. */
+  listingRef: z.string().max(120).optional(),
+  createdVia: z.enum(['WEB', 'WHATSAPP', 'API', 'DISCORD']).default('WEB'),
+  autoReleaseHours: z.number().int().min(1).max(168).optional(),
+});
+export type CreatePurchaseDto = z.infer<typeof createPurchaseSchema>;
+
 export const milestoneSchema = z.object({
   title: z.string().min(2).max(140),
   amount: amountMinor,

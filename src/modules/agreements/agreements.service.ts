@@ -19,6 +19,7 @@ import { OutcomeService } from '../outcome/outcome.service';
 import { PaymentsService } from '../payments/payments.service';
 import {
   CreateMilestoneAgreementDto,
+  CreatePurchaseDto,
   CreateTradeDto,
 } from './agreements.dto';
 import { nextAction } from './next-action';
@@ -105,6 +106,68 @@ export class AgreementsService {
     });
 
     return this.decorate(agreement, sellerId);
+  }
+
+  /**
+   * A buyer acting on a published listing (Amana Plug).
+   *
+   * `createTrade` assumes the seller is the caller, which is the wrong way
+   * round here: the listing is the seller's standing offer, so pressing Buy is
+   * the buyer accepting terms the seller already published. Both approvals are
+   * therefore present from the start, and approving on the buyer's behalf
+   * drives the normal transition into AWAITING_PAYMENT and opens the holding
+   * account — the buyer lands straight on a payable screen.
+   */
+  async createPurchase(buyerId: string, dto: CreatePurchaseDto) {
+    const seller = await this.auth.findOrCreateByPhone(dto.sellerPhone);
+    if (seller.id === buyerId) throw new BadRequestException('You cannot buy from yourself');
+
+    const expiryHours = Number(this.config.get('UNPAID_EXPIRY_HOURS') ?? 48);
+    const agreement = await this.prisma.agreement.create({
+      data: {
+        type: 'TRADE' as AgreementType,
+        payerId: buyerId,
+        payeeId: seller.id,
+        title: dto.title,
+        totalAmount: BigInt(dto.amount),
+        currency: dto.currency,
+        createdVia: dto.createdVia as Channel,
+        autoReleaseHours: dto.autoReleaseHours ?? Number(this.config.get('AUTO_RELEASE_HOURS') ?? 24),
+        expiresAt: new Date(Date.now() + expiryHours * 3_600_000),
+        terms: {
+          create: {
+            version: 1,
+            termsJson: {
+              title: dto.title,
+              amount: dto.amount,
+              currency: dto.currency,
+              deliveryTerms: dto.deliveryTerms ?? 'Delivery by Chowdeck; buyer confirms receipt',
+              dropoffAddress: dto.dropoffAddress,
+              listingRef: dto.listingRef,
+            } as Prisma.InputJsonValue,
+            // Publishing the listing is the seller's approval of these terms.
+            approvedByPayeeAt: new Date(),
+          },
+        },
+      },
+      include: AGREEMENT_INCLUDE,
+    });
+
+    await this.audit.record({
+      agreementId: agreement.id,
+      actor: buyerId,
+      action: 'agreement.created',
+      toStatus: 'DRAFT' as AgreementStatus,
+      meta: { via: dto.createdVia, listingRef: dto.listingRef },
+    });
+    await this.events.emit({
+      event: EVENTS.agreementCreated,
+      agreementId: agreement.id,
+      actor: buyerId,
+    });
+
+    // Pressing Buy is the buyer's approval, which opens the holding account.
+    return this.approve(agreement.id, buyerId);
   }
 
   /** Flow 2: a milestone contract, usually from the AI compiler's output. */
