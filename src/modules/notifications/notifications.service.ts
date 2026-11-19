@@ -32,7 +32,7 @@ export class NotificationsService {
     const values: Record<string, string> = {
       title: agreement.title,
       amount: formatAmount(agreement.totalAmount, agreement.currency),
-      link: String(payload.data?.checkoutUrl ?? `${base}/a/${agreement.id}`),
+      link: String(payload.data?.checkoutUrl ?? `${base}/o/${agreement.id}`),
       status: String(payload.data?.status ?? ''),
       accountNumber: String(payload.data?.accountNumber ?? ''),
       bankName: String(payload.data?.bankName ?? 'Paga'),

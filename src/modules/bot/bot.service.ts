@@ -128,7 +128,7 @@ export class BotService {
         `Item: ${item}\n` +
         `Price: ${formatAmount(BigInt(amountMinor!))}\n` +
         `Buyer: ${buyerPhone}\n\n` +
-        `The buyer gets this link to review and pay:\n${base}/a/${agreement.id}\n\n` +
+        `The buyer gets this link to review and pay:\n${base}/o/${agreement.id}\n\n` +
         `Money is held by Amana until the buyer confirms delivery.`,
     };
   }
