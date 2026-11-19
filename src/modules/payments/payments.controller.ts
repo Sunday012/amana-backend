@@ -54,10 +54,9 @@ export class PaymentsController {
    */
   @Put('payouts/account')
   @UseGuards(JwtAuthGuard)
-  @UsePipes(new ZodValidationPipe(payoutAccountSchema))
   setPayoutAccount(
     @CurrentUser() user: AuthUser,
-    @Body() body: z.infer<typeof payoutAccountSchema>,
+    @Body(new ZodValidationPipe(payoutAccountSchema)) body: z.infer<typeof payoutAccountSchema>,
   ) {
     return this.payments.setPayoutAccount(user.id, body.bankUuid, body.accountNumber);
   }

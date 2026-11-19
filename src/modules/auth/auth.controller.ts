@@ -46,8 +46,10 @@ export class AuthController {
    */
   @Patch('me/email')
   @UseGuards(JwtAuthGuard)
-  @UsePipes(new ZodValidationPipe(setEmailSchema))
-  setEmail(@CurrentUser() user: AuthUser, @Body() body: z.infer<typeof setEmailSchema>) {
+  setEmail(
+    @CurrentUser() user: AuthUser,
+    @Body(new ZodValidationPipe(setEmailSchema)) body: z.infer<typeof setEmailSchema>,
+  ) {
     return this.auth.setEmail(user.id, body.email);
   }
 }
