@@ -41,6 +41,7 @@ export class PaymentsService {
   async createCollection(agreementId: string): Promise<{
     reference: string;
     accountNumber?: string;
+    accountName?: string;
     bankName?: string;
     checkoutUrl?: string;
   }> {
@@ -96,6 +97,7 @@ export class PaymentsService {
       reference,
       // What the buyer actually needs: an account to transfer into.
       accountNumber: result.accountNumber,
+      accountName: result.accountName,
       bankName: result.bankName,
       checkoutUrl: result.checkoutUrl,
     };

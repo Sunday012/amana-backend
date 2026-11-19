@@ -40,6 +40,7 @@ export class FakePagaProvider extends PaymentProvider {
       providerRef: `fake-col-${randomUUID().slice(0, 8)}`,
       // Mirrors the real flow: the buyer is given an account to pay into.
       accountNumber: `90${randomUUID().replace(/\D/g, '').padEnd(8, '0').slice(0, 8)}`,
+      accountName: `Amana · ${req.description}`.slice(0, 100),
       bankName: 'Fake Bank',
       checkoutUrl: `${base}/pay/${req.reference}`,
       settled: false,

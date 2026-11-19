@@ -20,6 +20,8 @@ export interface CollectionResult {
    * already landed in our own balance.
    */
   accountNumber?: string;
+  /** Shown to the payer in their bank app when they confirm the transfer. */
+  accountName?: string;
   bankName?: string;
   /** Only for providers that use a hosted checkout page. */
   checkoutUrl?: string;

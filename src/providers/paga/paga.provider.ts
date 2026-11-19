@@ -209,7 +209,9 @@ export class PagaProvider extends PaymentProvider {
       {
         referenceNumber: req.reference,
         accountReference,
-        accountName: req.description.slice(0, 100),
+        // What the buyer sees as the account name in their bank app, so it has
+        // to name us and the order rather than just the item.
+        accountName: `Amana · ${req.description}`.slice(0, 100),
         firstName,
         lastName,
         phoneNumber: PagaProvider.localPhone(req.payerPhone),
@@ -227,6 +229,7 @@ export class PagaProvider extends PaymentProvider {
       reference: req.reference,
       providerRef: result.accountReference ?? accountReference,
       accountNumber: result.accountNumber,
+      accountName: `Amana · ${req.description}`.slice(0, 100),
       bankName: 'Paga',
       settled: false,
     };
